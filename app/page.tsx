@@ -1,42 +1,61 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { BarChart3, Dumbbell, UserRound, Plus, Check } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { BarChart3, Check, Dumbbell, LogOut, Plus, UserRound } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { createAccount, db, getSession, Session, updateProfileName } from "../lib/supabase";
 
-type SetRow = { reps:number; weight:number; done:boolean };
-type Exercise = { name:string; muscle:string; sets:SetRow[] };
+type DbExercise = { id:string; name:string; muscle_group:string|null; is_custom:boolean; user_id:string|null };
+type SetRow = { id?:string; set_number:number; reps:number; weight:number; completed_at?:string|null; done:boolean };
+type WorkoutExercise = { id:string; exercise_id:string; sort_order:number; exercise:DbExercise; sets:SetRow[] };
 
-const starters: Exercise[] = [
- {name:"Bench Press",muscle:"Chest",sets:[{reps:8,weight:135,done:false},{reps:8,weight:135,done:false},{reps:6,weight:145,done:false}]},
- {name:"Squat",muscle:"Legs",sets:[{reps:5,weight:185,done:false},{reps:5,weight:185,done:false}]},
-];
-const progress = [{d:"Jun 1",w:125},{d:"Jun 15",w:135},{d:"Jul 1",w:140},{d:"Jul 15",w:145},{d:"Aug 1",w:150},{d:"Aug 15",w:155}];
+type CatalogExercise = DbExercise & { image:string };
+const imageFor = (name:string) => {
+ const map:Record<string,string> = {
+  "Bench Press":"https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=700&q=80",
+  "Squat":"https://images.unsplash.com/photo-1574680096145-d05b474e2155?auto=format&fit=crop&w=700&q=80",
+  "Deadlift":"https://images.unsplash.com/photo-1517963879433-6ad2b056d7f3?auto=format&fit=crop&w=700&q=80",
+  "Overhead Press":"https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=700&q=80",
+  "Barbell Row":"https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?auto=format&fit=crop&w=700&q=80",
+  "Lat Pulldown":"https://images.unsplash.com/photo-1598971639058-a3f0c9f2b2a1?auto=format&fit=crop&w=700&q=80",
+  "Pull-Up":"https://images.unsplash.com/photo-1598971639058-a3f0c9f2b2a1?auto=format&fit=crop&w=700&q=80",
+ }; return map[name] || "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=700&q=80";
+};
 
 export default function Home(){
- const [tab,setTab]=useState<"today"|"progress"|"profile">("today");
- const [exercises,setExercises]=useState(starters);
- const [selected,setSelected]=useState(0);
- const [profile,setProfile]=useState("Jonny");
- const current=exercises[selected];
- const completed=useMemo(()=>exercises.reduce((n,e)=>n+e.sets.filter(s=>s.done).length,0),[exercises]);
- function updateSet(i:number,key:"reps"|"weight",value:string){ setExercises(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:e.sets.map((s,si)=>si===i?{...s,[key]:Number(value)}:s)})); }
- function toggle(i:number){setExercises(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:e.sets.map((s,si)=>si===i?{...s,done:!s.done}:s)}));}
- function addSet(){setExercises(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:[...e.sets,{reps:e.sets.at(-1)?.reps||8,weight:e.sets.at(-1)?.weight||0,done:false}]}));}
- function addExercise(){const name=prompt("Exercise name");if(!name)return;setExercises(es=>[...es,{name,muscle:"Custom",sets:[{reps:8,weight:0,done:false}]}]);setSelected(exercises.length);}
- return <main className="app">
-  <header className="top"><div className="logo">RepTrack</div><button className="pill" onClick={()=>setTab("profile")}>{profile}</button></header>
-  {tab==="today"&&<>
-   <section className="hero"><div className="label">Today</div><h1>Get it done.</h1><div className="muted">{completed} sets completed · Keep your momentum.</div></section>
-   <div className="grid"><div className="stat"><b>{exercises.length}</b><span className="muted">Exercises</span></div><div className="stat"><b>{completed}</b><span className="muted">Sets done</span></div><div className="stat"><b>52m</b><span className="muted">Est. time</span></div></div>
-   <section className="card"><div className="section-head"><h2>Exercises</h2><button className="secondary" onClick={addExercise}><Plus size={15}/> Add</button></div><div className="row">{exercises.map((e,i)=><button key={e.name} className={"secondary"+(i===selected?" active":"")} onClick={()=>setSelected(i)}>{e.name}</button>)}</div></section>
-   <section className="card section"><div className="section-head"><div><h2>{current.name}</h2><span className="muted">{current.muscle} · {current.sets.length} sets</span></div><span className="pill">Last: {current.sets[0]?.weight || 0} lb</span></div>
-    <div className="sets">{current.sets.map((s,i)=><div className="set" key={i}><span className="setnum">{i+1}</span><input aria-label="reps" type="number" value={s.reps} onChange={e=>updateSet(i,"reps",e.target.value)}/><input aria-label="weight" type="number" value={s.weight} onChange={e=>updateSet(i,"weight",e.target.value)}/><span className="label">lb</span><button className={"check "+(s.done?"done":"")} onClick={()=>toggle(i)}>{s.done&&<Check size={18}/>}</button></div>)}</div>
-    <div className="row section"><button className="secondary" onClick={addSet}>+ Add set</button><button className="primary" onClick={()=>toggle(current.sets.findIndex(s=>!s.done))}>Save set</button></div>
-   </section>
-  </>}
-  {tab==="progress"&&<><section className="hero"><div className="label">Progress</div><h1>Stronger over time.</h1><div className="muted">Your best Bench Press weight, lb.</div></section><section className="card"><div className="section-head"><h2>Bench Press</h2><span className="pill">+30 lb</span></div><div className="chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={progress}><CartesianGrid vertical={false}/><XAxis dataKey="d" tickLine={false}/><YAxis domain={[100,170]} tickLine={false}/><Tooltip/><Bar dataKey="w" radius={[7,7,0,0]}/></BarChart></ResponsiveContainer></div></section><section className="card section"><div className="section-head"><h2>Recent sessions</h2><span className="muted">6 weeks</span></div><div className="history">{progress.slice().reverse().slice(0,4).map(p=><div key={p.d}><span>{p.d}</span><b>{p.w} lb × 1</b></div>)}</div></section></>}
-  {tab==="profile"&&<><section className="hero"><div className="label">Profile</div><h1>Train your way.</h1><div className="muted">Your workout history stays with your profile.</div></section><section className="card"><div className="field"><label>Name</label><input value={profile} onChange={e=>setProfile(e.target.value)}/></div><div className="grid"><div className="stat"><b>18</b><span className="muted">Workouts</span></div><div className="stat"><b>142</b><span className="muted">Sets</span></div><div className="stat"><b>7</b><span className="muted">Exercises</span></div></div><button className="primary" onClick={()=>alert("Profile saved")}>Save profile</button></section></>}
-  <nav className="bottom"><button className={"nav "+(tab==="today"?"active":"")} onClick={()=>setTab("today")}><Dumbbell size={17}/><br/>Today</button><button className={"nav "+(tab==="progress"?"active":"")} onClick={()=>setTab("progress")}><BarChart3 size={17}/><br/>Progress</button><button className={"nav "+(tab==="profile"?"active":"")} onClick={()=>setTab("profile")}><UserRound size={17}/><br/>Profile</button></nav>
- </main>
+ const [session,setSession]=useState<Session|null>(null); const [loading,setLoading]=useState(true); const [error,setError]=useState(""); const [name,setName]=useState(""); const [tab,setTab]=useState<"today"|"progress"|"profile">("today");
+ const [catalog,setCatalog]=useState<CatalogExercise[]>([]); const [workoutExercises,setWorkoutExercises]=useState<WorkoutExercise[]>([]); const [selected,setSelected]=useState(0); const [progress,setProgress]=useState<{d:string;w:number}[]>([]); const [saving,setSaving]=useState(false);
+ const current=workoutExercises[selected]; const completed=useMemo(()=>workoutExercises.reduce((n,e)=>n+e.sets.filter(s=>s.done).length,0),[workoutExercises]);
+
+ useEffect(()=>{ (async()=>{ try { const s=await getSession(); if(s){setSession(s);setName(s.user.user_metadata?.display_name||""); await loadData(s); } } catch(e){setError(e instanceof Error?e.message:"Could not load app");} finally{setLoading(false);} })(); },[]);
+ async function loadData(s:Session){
+  const ex=await db<DbExercise[]>("exercises?select=*&order=name",{},s); setCatalog(ex.map(e=>({...e,image:imageFor(e.name)})));
+  const start=new Date(); start.setHours(0,0,0,0); const workoutRows=await db<any[]>(`workouts?select=*&user_id=eq.${s.user.id}&started_at=gte.${encodeURIComponent(start.toISOString())}&order=started_at.desc&limit=1`,{},s);
+  let workout=workoutRows[0]; if(!workout){ const created=await db<any[]>("workouts",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({user_id:s.user.id})},s); workout=created[0]; }
+  const wes=await db<any[]>(`workout_exercises?select=*&workout_id=eq.${workout.id}&order=sort_order`,{},s); const ids=wes.map(w=>w.exercise_id);
+  const setRows=ids.length?await db<any[]>(`sets?select=*&workout_exercise_id=in.(${wes.map(w=>w.id).join(",")})&order=set_number`,{},s):[];
+  const byId:Record<string,SetRow[]>={}; setRows.forEach(x=>(byId[x.workout_exercise_id] ||= []).push({...x,done:!!x.completed_at}));
+  const byExercise=Object.fromEntries(ex.map(x=>[x.id,x])); setWorkoutExercises(wes.map(w=>({...w,exercise:byExercise[w.exercise_id],sets:byId[w.id]||[{set_number:1,reps:8,weight:0,done:false}]})).filter(w=>w.exercise));
+  if(wes.length===0) setSelected(0); else setSelected(0);
+  await loadProgress(s, ex[0]?.id);
+ }
+ async function loadProgress(s:Session, exerciseId?:string){ if(!exerciseId)return; const wes=await db<any[]>(`workout_exercises?select=id,workout:workouts!inner(user_id,started_at)&exercise_id=eq.${exerciseId}&workout.user_id=eq.${s.user.id}&order=workout.started_at`,{},s); if(!wes.length){setProgress([]);return;} const sets=await db<any[]>(`sets?select=*&workout_exercise_id=in.(${wes.map(w=>w.id).join(",")})&completed_at=not.is.null&order=completed_at`,{},s); const map=new Map<string,number>(); wes.forEach(w=>map.set(w.id,new Date(w.workout.started_at).toLocaleDateString(undefined,{month:"short",day:"numeric"}))); setProgress(sets.map(x=>({d:map.get(x.workout_exercise_id)||"",w:Number(x.weight)})).filter(x=>x.w>0)); }
+ useEffect(()=>{if(session&&current) loadProgress(session,current.exercise_id).catch(()=>{});},[selected]);
+ async function start(nameValue:string){ if(!nameValue.trim())return; setError(""); setLoading(true); try{const s=await createAccount(nameValue); setSession(s);setName(nameValue.trim()); await db("profiles",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify({id:s.user.id,display_name:nameValue.trim()})},s); await loadData(s);}catch(e){setError(e instanceof Error?e.message:"Could not create account");}finally{setLoading(false);} }
+ async function addExercise(e:CatalogExercise){ if(!session)return; const existing=workoutExercises.findIndex(x=>x.exercise_id===e.id); if(existing>=0){setSelected(existing);return;} const workout=await db<any[]>(`workouts?select=id&user_id=eq.${session.user.id}&order=started_at.desc&limit=1`,{},session); const row=await db<any[]>("workout_exercises",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({workout_id:workout[0].id,exercise_id:e.id,sort_order:workoutExercises.length})},session); setWorkoutExercises(x=>[...x,{...row[0],exercise:e,sets:[{set_number:1,reps:8,weight:0,done:false}]}]);setSelected(workoutExercises.length); }
+ function editSet(i:number,key:"reps"|"weight",value:string){setWorkoutExercises(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:e.sets.map((s,si)=>si===i?{...s,[key]:Number(value)}:s)}));}
+ function addSet(){if(!current)return;setWorkoutExercises(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:[...e.sets,{set_number:e.sets.length+1,reps:e.sets.at(-1)?.reps||8,weight:e.sets.at(-1)?.weight||0,done:false}]}));}
+ async function saveSet(i:number){if(!session||!current)return; const s=current.sets[i]; if(!s||s.reps<=0)return;setSaving(true);try{if(s.id) await db(`sets?id=eq.${s.id}`,{method:"PATCH",body:JSON.stringify({reps:s.reps,weight:s.weight,completed_at:new Date().toISOString()})},session);else {const inserted=await db<any[]>("sets",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({workout_exercise_id:current.id,set_number:s.set_number,reps:s.reps,weight:s.weight,completed_at:new Date().toISOString()})},session);s.id=inserted[0]?.id;} setWorkoutExercises(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:e.sets.map((x,si)=>si===i?{...x,done:true,completed_at:new Date().toISOString()}:x)}));}finally{setSaving(false);}}
+ async function saveName(){if(!session||!name.trim())return; const s=await updateProfileName(session,name);setSession(s);await db("profiles",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify({id:s.user.id,display_name:name.trim()})},s);}
+ function forgetDevice(){localStorage.removeItem("reptrack-auth");location.reload();}
+ if(loading)return <main className="app"><div className="loading">Loading your gym...</div></main>;
+ if(!session)return <main className="app auth-screen"><div className="logo">RepTrack</div><section className="hero auth-hero"><div className="label">Your gym log</div><h1>Just your name. Then train.</h1><div className="muted">No email. No password. Your browser remembers you.</div></section><section className="card"><div className="field"><label>Your name</label><input autoFocus value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&start(name)} placeholder="e.g. Alex"/></div>{error&&<p className="error">{error}</p>}<button className="primary" onClick={()=>start(name)} disabled={!name.trim()}>Create my account</button><p className="tiny">This creates a real Supabase account tied to this browser. You can later add email/Google sign-in without losing your workouts.</p></section></main>;
+ return <main className="app"><header className="top"><div className="logo">RepTrack</div><button className="pill" onClick={()=>setTab("profile")}>{name||"Profile"}</button></header>
+ {tab==="today"&&<><section className="hero"><div className="label">Today</div><h1>Get it done.</h1><div className="muted">{completed} sets completed · Your data is saved.</div></section><div className="grid"><div className="stat"><b>{workoutExercises.length}</b><span className="muted">Exercises</span></div><div className="stat"><b>{completed}</b><span className="muted">Sets done</span></div><div className="stat"><b>{progress.length}</b><span className="muted">Progress points</span></div></div>
+ <section className="card"><div className="section-head"><h2>Add exercise</h2><span className="muted">Tap a picture</span></div><div className="exercise-grid">{catalog.map(e=><button className="exercise-card" key={e.id} onClick={()=>addExercise(e)}><img src={e.image} alt=""/><span>{e.name}</span><small>{e.muscle_group}</small></button>)}</div></section>
+ {current&&<section className="card section"><div className="section-head"><div><h2>{current.exercise.name}</h2><span className="muted">{current.exercise.muscle_group} · {current.sets.length} sets</span></div><span className="pill">Last: {current.sets.at(-1)?.weight||0} lb</span></div><div className="sets">{current.sets.map((s,i)=><div className="set" key={s.id||i}><span className="setnum">{i+1}</span><input aria-label="reps" type="number" value={s.reps} onChange={e=>editSet(i,"reps",e.target.value)}/><input aria-label="weight" type="number" value={s.weight} onChange={e=>editSet(i,"weight",e.target.value)}/><span className="label">lb</span><button className={"check "+(s.done?"done":"")} onClick={()=>saveSet(i)} disabled={saving}>{s.done?<Check size={18}/>:<span>✓</span>}</button></div>)}</div><button className="secondary full" onClick={addSet}>+ Add set</button></section>}
+ </>}
+ {tab==="progress"&&<><section className="hero"><div className="label">Progress</div><h1>Real numbers. Real progress.</h1><div className="muted">{current?.exercise.name||"Add an exercise"} · saved sets only.</div></section><section className="card"><div className="section-head"><h2>{current?.exercise.name||"Choose an exercise"}</h2><span className="pill">{progress.length} entries</span></div><div className="chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={progress}><CartesianGrid vertical={false}/><XAxis dataKey="d" tickLine={false}/><YAxis tickLine={false}/><Tooltip/><Bar dataKey="w" radius={[7,7,0,0]}/></BarChart></ResponsiveContainer></div></section></>}
+ {tab==="profile"&&<><section className="hero"><div className="label">Profile</div><h1>Hey {name}.</h1><div className="muted">Your workouts stay linked to your account.</div></section><section className="card"><div className="field"><label>Name</label><input value={name} onChange={e=>setName(e.target.value)}/></div><button className="primary" onClick={saveName}>Save profile</button><button className="danger" onClick={forgetDevice}><LogOut size={15}/> Forget this device</button></section></>}
+ <nav className="bottom"><button className={"nav "+(tab==="today"?"active":"")} onClick={()=>setTab("today")}><Dumbbell size={17}/><br/>Today</button><button className={"nav "+(tab==="progress"?"active":"")} onClick={()=>setTab("progress")}><BarChart3 size={17}/><br/>Progress</button><button className={"nav "+(tab==="profile"?"active":"")} onClick={()=>setTab("profile")}><UserRound size={17}/><br/>Profile</button></nav></main>;
 }
