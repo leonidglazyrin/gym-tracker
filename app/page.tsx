@@ -1,152 +1,102 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, Check, Dumbbell, LogOut, Plus, Trash2, UserRound } from "lucide-react";
+import { BarChart3, Check, ChevronRight, Clock3, Dumbbell, Flame, LogOut, Minus, Plus, Search, Trophy, UserRound, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { createAccount, db, deleteAccount, getSession, Session, updateProfileName } from "../lib/supabase";
 
-type DbExercise = { id:string; name:string; muscle_group:string|null; is_custom:boolean; user_id:string|null };
-type SetRow = { id?:string; set_number:number; reps:number; weight:number; completed_at?:string|null; done:boolean };
-type WorkoutExercise = { id:string; exercise_id:string; sort_order:number; exercise:DbExercise; sets:SetRow[] };
-type CatalogExercise = DbExercise & { image:string };
+type Exercise={id:string;name:string;muscle_group:string|null;is_custom:boolean;user_id:string|null};
+type Template={id:string;name:string;description:string|null;exercise_ids:string[]};
+type SetRow={id?:string;set_number:number;reps:number;weight:number;completed_at?:string|null;done:boolean};
+type WorkoutExercise={id:string;exercise_id:string;sort_order:number;exercise:Exercise;sets:SetRow[]};
+type Workout={id:string;started_at:string;ended_at?:string|null;duration?:number|null;status:string;template_id?:string|null};
+type HistoryWorkout=Workout;
 
-const exerciseImageBase="https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/";
-const imageFor=(name:string)=>`${exerciseImageBase}${encodeURIComponent(name.trim().replace(/ /g,"_"))}/0.jpg`;
-const muscleGroups=["Chest","Back","Legs","Shoulders","Biceps","Triceps","Abs","Calves","Lower Back"];
+const IMG="https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/";
+const imageFor=(name:string)=>`${IMG}${encodeURIComponent(name.trim().replace(/ /g,"_"))}/0.jpg`;
+const muscles=["All","Chest","Back","Shoulders","Biceps","Triceps","Legs","Glutes","Core","Calves","Lower Back"];
+const draftKey=(id:string)=>`reptrack-draft-${id}`;
 
 export default function Home(){
-  const [session,setSession]=useState<Session|null>(null);
-  const [loading,setLoading]=useState(true);
-  const [error,setError]=useState("");
-  const [name,setName]=useState("");
-  const [tab,setTab]=useState<"today"|"progress"|"profile">("today");
-  const [catalog,setCatalog]=useState<CatalogExercise[]>([]);
-  const [workoutExercises,setWorkoutExercises]=useState<WorkoutExercise[]>([]);
-  const [selected,setSelected]=useState(0);
-  const [progress,setProgress]=useState<{d:string;w:number}[]>([]);
-  const [saving,setSaving]=useState(false);
-  const [deleting,setDeleting]=useState(false);
-  const [newExercise,setNewExercise]=useState("");
-  const [newMuscle,setNewMuscle]=useState("Chest");
+ const [session,setSession]=useState<Session|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState("");
+ const [name,setName]=useState(""),[tab,setTab]=useState<"workout"|"evolution"|"profile">("workout");
+ const [members,setMembers]=useState<{id:string;display_name:string}[]>([]),[picker,setPicker]=useState(false);
+ const [catalog,setCatalog]=useState<Exercise[]>([]),[templates,setTemplates]=useState<Template[]>([]),[history,setHistory]=useState<HistoryWorkout[]>([]);
+ const [workout,setWorkout]=useState<Workout|null>(null),[items,setItems]=useState<WorkoutExercise[]>([]),[selected,setSelected]=useState(0);
+ const [search,setSearch]=useState(""),[muscle,setMuscle]=useState("All"),[saving,setSaving]=useState(false),[rest,setRest]=useState(0),[restOn,setRestOn]=useState(false);
+ const [progress,setProgress]=useState<{d:string;w:number}[]>([]),[showStart,setShowStart]=useState(false),[complete,setComplete]=useState(false),[details,setDetails]=useState<HistoryWorkout|null>(null);
+ const [newExercise,setNewExercise]=useState(""),[newMuscle,setNewMuscle]=useState("Chest"),[now,setNow]=useState(Date.now());
+ const current=items[selected];
+ const done=useMemo(()=>items.reduce((n,e)=>n+e.sets.filter(s=>s.done).length,0),[items]);
+ const setCount=useMemo(()=>items.reduce((n,e)=>n+e.sets.length,0),[items]);
+ const reps=useMemo(()=>items.reduce((n,e)=>n+e.sets.filter(s=>s.done).reduce((a,s)=>a+s.reps,0),0),[items]);
+ const volume=useMemo(()=>items.reduce((n,e)=>n+e.sets.filter(s=>s.done).reduce((a,s)=>a+s.weight*s.reps,0),0),[items]);
+ const filtered=useMemo(()=>catalog.filter(e=>(muscle==="All"||e.muscle_group===muscle)&&e.name.toLowerCase().includes(search.toLowerCase())).slice(0,18),[catalog,muscle,search]);
+ const elapsed=workout?Math.max(0,Math.floor((now-new Date(workout.started_at).getTime())/1000)):0;
 
-  const current=workoutExercises[selected];
-  const completed=useMemo(()=>workoutExercises.reduce((n,e)=>n+e.sets.filter(s=>s.done).length,0),[workoutExercises]);
-  const totalSets=useMemo(()=>workoutExercises.reduce((n,e)=>n+e.sets.length,0),[workoutExercises]);
+ useEffect(()=>{(async()=>{try{
+   const anon={user:{id:"00000000-0000-0000-0000-000000000000"}} as Session;
+   const ms=await db<any[]>("profiles?select=id,display_name&display_name=not.is.null&order=display_name",{},anon).catch(()=>[]);setMembers(ms.filter(x=>x.display_name));
+   const s=await getSession();if(s){setSession(s);setName(s.user.user_metadata?.display_name||"");await loadAll(s)}
+ }catch(e){setError(e instanceof Error?e.message:"Could not load app")}finally{setLoading(false)}})()},[]);
+ useEffect(()=>{if(!workout)return;const t=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(t)},[workout]);
+ useEffect(()=>{if(!restOn)return;const t=setInterval(()=>setRest(v=>{if(v<=1){setRestOn(false);return 0}return v-1}),1000);return()=>clearInterval(t)},[restOn]);
+ useEffect(()=>{if(session&&workout)try{localStorage.setItem(draftKey(session.user.id),JSON.stringify({workout,items,selected}))}catch{}},[session,workout,items,selected]);
 
-  useEffect(()=>{(async()=>{
-    try{const s=await getSession();if(s){setSession(s);setName(s.user.user_metadata?.display_name||"");await loadData(s);}}
-    catch(e){setError(e instanceof Error?e.message:"Could not load app");}
-    finally{setLoading(false);}
-  })();},[]);
+ async function loadAll(s:Session){
+   const ex=await db<Exercise[]>(`exercises?select=*&user_id=eq.${s.user.id}&order=name`,{},s).catch(()=>[]);setCatalog(ex);
+   const ts=await db<any[]>("workout_templates?select=id,name,description,workout_template_exercises(exercise_id,sort_order)&order=name",{},s).catch(()=>[]);
+   setTemplates(ts.map(t=>({...t,exercise_ids:(t.workout_template_exercises||[]).sort((a:any,b:any)=>a.sort_order-b.sort_order).map((x:any)=>x.exercise_id)})));
+   const hs=await db<HistoryWorkout[]>(`workouts?select=id,started_at,ended_at,duration,status,template_id&user_id=eq.${s.user.id}&status=eq.completed&order=started_at.desc&limit=40`,{},s).catch(()=>[]);setHistory(hs);
+   const draft=localStorage.getItem(draftKey(s.user.id));if(draft){try{const d=JSON.parse(draft);if(d.workout&&d.items){setWorkout(d.workout);setItems(d.items);setSelected(d.selected||0);return}}catch{}}
+   const open=await db<Workout[]>(`workouts?select=*&user_id=eq.${s.user.id}&status=eq.in_progress&order=started_at.desc&limit=1`,{},s).catch(()=>[]);
+   if(open[0])await hydrate(s,open[0]);else{setWorkout(null);setItems([]);setSelected(0)}
+ }
+ async function hydrate(s:Session,w:Workout){
+   const wes=await db<any[]>(`workout_exercises?select=*&workout_id=eq.${w.id}&order=sort_order`,{},s);const sr=wes.length?await db<any[]>(`sets?select=*&workout_exercise_id=in.(${wes.map(x=>x.id).join(",")})&order=set_number`,{},s):[];
+   const by:Record<string,SetRow[]>={};sr.forEach(x=>(by[x.workout_exercise_id]||=[]).push({...x,done:!!x.completed_at}));const exBy=Object.fromEntries(catalog.map(e=>[e.id,e]));
+   setWorkout(w);setItems(wes.map(x=>({...x,exercise:exBy[x.exercise_id],sets:by[x.id]||[{set_number:1,reps:8,weight:0,done:false}]})).filter(x=>x.exercise));setSelected(0);
+ }
+ async function previous(s:Session,id:string){
+   const rows=await db<any[]>(`workout_exercises?select=id,workout:workouts!inner(id,user_id,started_at,status)&exercise_id=eq.${id}&workout.user_id=eq.${s.user.id}&workout.status=eq.completed&order=workout(started_at).desc&limit=1`,{},s).catch(()=>[]);if(!rows[0])return [];
+   return db<any[]>(`sets?select=reps,weight&workout_exercise_id=eq.${rows[0].id}&completed_at=not.is.null&order=set_number`,{},s).catch(()=>[]);
+ }
+ async function startWorkout(t:Template){
+   if(!session)return;setError("");try{
+    const w=(await db<Workout[]>("workouts",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({user_id:session.user.id,template_id:t.id,status:"in_progress"})},session))[0];
+    const ids=t.exercise_ids.filter(id=>catalog.some(e=>e.id===id));const rows=ids.length?await db<any[]>("workout_exercises",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify(ids.map((exercise_id,i)=>({workout_id:w.id,exercise_id,sort_order:i})))},session):[];
+    const exBy=Object.fromEntries(catalog.map(e=>[e.id,e]));const next:WorkoutExercise[]=[];for(const r of rows){const last=await previous(session,r.exercise_id);next.push({...r,exercise:exBy[r.exercise_id],sets:last.length?last.map((x:any,i)=>({set_number:i+1,reps:Number(x.reps),weight:Number(x.weight),done:false})): [{set_number:1,reps:8,weight:0,done:false}]})}
+    setWorkout(w);setItems(next);setSelected(0);setShowStart(false);setTab("workout");
+   }catch(e){setError(e instanceof Error?e.message:"Could not start workout")}
+ }
+ function edit(i:number,key:"weight"|"reps",v:string){setItems(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:e.sets.map((s,si)=>si===i?{...s,[key]:v===""?0:Number(v)}:s)}))}
+ function addSet(){if(!current)return;setItems(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:[...e.sets,{set_number:e.sets.length+1,reps:e.sets.at(-1)?.reps||8,weight:e.sets.at(-1)?.weight||0,done:false}]}))}
+ async function saveSet(i:number){if(!session||!current)return;const s=current.sets[i];if(!s||s.reps<1||s.weight<0)return;setSaving(true);try{const at=new Date().toISOString();if(s.id)await db(`sets?id=eq.${s.id}`,{method:"PATCH",body:JSON.stringify({reps:s.reps,weight:s.weight,completed_at:at})},session);else{const r=await db<any[]>("sets",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({workout_exercise_id:current.id,set_number:s.set_number,reps:s.reps,weight:s.weight,completed_at:at})},session);s.id=r[0]?.id}setItems(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:e.sets.map((x,si)=>si===i?{...x,done:true,completed_at:at}:x)}));setRest(60);setRestOn(true)}catch{setError("We couldn’t sync that set yet. Your workout is still saved on this device.")}finally{setSaving(false)}}
+ async function next(){if(!current)return;for(let i=0;i<current.sets.length;i++)if(!current.sets[i].done&&current.sets[i].reps>0)await saveSet(i);if(selected<items.length-1){setSelected(selected+1);window.scrollTo({top:0,behavior:"smooth"})}else await finish()}
+ async function finish(){if(!session||!workout)return;try{const end=new Date(),dur=Math.max(0,Math.round((end.getTime()-new Date(workout.started_at).getTime())/1000));await db(`workouts?id=eq.${workout.id}`,{method:"PATCH",body:JSON.stringify({ended_at:end.toISOString(),duration:dur,status:"completed"})},session);const doneWorkout={...workout,ended_at:end.toISOString(),duration:dur,status:"completed"};setHistory(h=>[doneWorkout,...h]);localStorage.removeItem(draftKey(session.user.id));setComplete(true)}catch{setError("Your workout is safe on this device. We’ll finish syncing when the connection returns.")}}
+ async function addExercise(e:Exercise){if(!session)return;if(!workout){setShowStart(true);return}if(items.some(x=>x.exercise_id===e.id)){setSelected(items.findIndex(x=>x.exercise_id===e.id));focus();return}try{const r=(await db<any[]>("workout_exercises",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({workout_id:workout.id,exercise_id:e.id,sort_order:items.length})},session))[0];setItems(x=>[...x,{...r,exercise:e,sets:[{set_number:1,reps:8,weight:0,done:false}]}]);setSelected(items.length);focus()}catch{setError("Could not add that exercise")}}
+ async function createExercise(){if(!session||!newExercise.trim())return;try{const r=await db<Exercise[]>("exercises",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({name:newExercise.trim(),muscle_group:newMuscle,is_custom:true,user_id:session.user.id})},session);setCatalog(c=>[...c,...r].sort((a,b)=>a.name.localeCompare(b.name)));setNewExercise("")}catch{setError("Could not create exercise")}}
+ function focus(){requestAnimationFrame(()=>document.getElementById("current-workout")?.scrollIntoView({behavior:"smooth",block:"start"}))}
+ function time(sec:number){return `${String(Math.floor(sec/60)).padStart(2,"0")}:${String(sec%60).padStart(2,"0")}`}
+ async function switchUser(id:string){const p=members.find(m=>m.id===id);if(!p)return;const s=await createAccount(p.display_name,p.id);setSession(s);setName(p.display_name);setPicker(false);setLoading(true);try{await loadAll(s)}finally{setLoading(false)}}
+ async function saveName(){if(!session||!name.trim())return;const s=await updateProfileName(session,name);setSession(s);await db(`profiles?id=eq.${s.user.id}`,{method:"PATCH",body:JSON.stringify({display_name:name.trim()})},s);setMembers(m=>m.map(x=>x.id===s.user.id?{...x,display_name:name.trim()}:x))}
+ async function addMember(){if(!name.trim())return;const s=await createAccount(name);setSession(s);setLoading(true);try{await db("profiles",{method:"POST",headers:{Prefer:"resolution=merge-duplicates"},body:JSON.stringify({id:s.user.id,display_name:name.trim()})},s);setMembers(m=>[...m,{id:s.user.id,display_name:name.trim()}]);await loadAll(s)}finally{setLoading(false)}}
+ function forget(){localStorage.removeItem("reptrack-user");location.reload()}
+ async function deleteMe(){if(!session||!window.confirm("Delete your profile and workout history? This cannot be undone."))return;try{await deleteAccount(session);location.reload()}catch{setError("Could not delete your data")}}
 
-  async function ensureExerciseLibrary(s:Session){
-    const profiles=await db<any[]>(`profiles?select=exercise_library_initialized&id=eq.${s.user.id}&limit=1`,{},s);
-    if(profiles[0]?.exercise_library_initialized)return;
-    const templates=await db<DbExercise[]>("exercises?select=*&user_id=is.null&order=name",{},s);
-    if(templates.length)await db("exercises",{method:"POST",headers:{Prefer:"return=minimal"},body:JSON.stringify(templates.map(e=>({name:e.name,muscle_group:e.muscle_group,is_custom:false,user_id:s.user.id})))},s);
-    await db(`profiles?id=eq.${s.user.id}`,{method:"PATCH",headers:{Prefer:"return=minimal"},body:JSON.stringify({exercise_library_initialized:true})},s);
-  }
+ if(loading)return <main className="app splash"><div className="logo">RepTrack</div><p>Getting you ready to train…</p></main>;
+ if(!session)return <main className="app welcome"><div className="logo">RepTrack</div><section className="hero"><span className="eyebrow">PRIVATE GYM LOG</span><h1>Your workouts.<br/>Your progress.</h1><p>No passwords. No clutter. Just train.</p></section><section className="card"><span className="eyebrow">WHO ARE YOU?</span><div className="member-grid">{members.map(m=><button className="member" key={m.id} onClick={()=>switchUser(m.id)}><i>{m.display_name[0]}</i>{m.display_name}</button>)}</div><div className="or">or</div><input autoFocus value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addMember()} placeholder="Enter your name"/><button className="primary" disabled={!name.trim()} onClick={addMember}>START TRAINING <ChevronRight size={18}/></button>{error&&<p className="error">{error}</p>}</section></main>;
 
-  async function loadData(s:Session){
-    await ensureExerciseLibrary(s);
-    const ex=await db<DbExercise[]>(`exercises?select=*&user_id=eq.${s.user.id}&order=name`,{},s);
-    setCatalog(ex.map(e=>({...e,image:imageFor(e.name)})));
-    const start=new Date();start.setHours(0,0,0,0);
-    const wr=await db<any[]>(`workouts?select=*&user_id=eq.${s.user.id}&started_at=gte.${encodeURIComponent(start.toISOString())}&order=started_at.desc&limit=1`,{},s);
-    let workout=wr[0];
-    if(!workout)workout=(await db<any[]>("workouts",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({user_id:s.user.id})},s))[0];
-    const wes=await db<any[]>(`workout_exercises?select=*&workout_id=eq.${workout.id}&order=sort_order`,{},s);
-    const sr=wes.length?await db<any[]>(`sets?select=*&workout_exercise_id=in.(${wes.map(w=>w.id).join(",")})&order=set_number`,{},s):[];
-    const by:Record<string,SetRow[]>={};sr.forEach(x=>(by[x.workout_exercise_id] ||= []).push({...x,done:!!x.completed_at}));
-    const byEx=Object.fromEntries(ex.map(x=>[x.id,x]));
-    setWorkoutExercises(wes.map(w=>({...w,exercise:byEx[w.exercise_id],sets:by[w.id]||[{set_number:1,reps:8,weight:0,done:false}]})).filter(w=>w.exercise));
-    setSelected(0);
-    await loadProgress(s,ex[0]?.id);
-  }
-
-  async function loadProgress(s:Session,exerciseId?:string){
-    if(!exerciseId){setProgress([]);return;}
-    const wes=await db<any[]>(`workout_exercises?select=id,workout:workouts!inner(user_id,started_at)&exercise_id=eq.${exerciseId}&workout.user_id=eq.${s.user.id}&order=workout(started_at).asc`,{},s);
-    if(!wes.length){setProgress([]);return;}
-    const sets=await db<any[]>(`sets?select=*&workout_exercise_id=in.(${wes.map(w=>w.id).join(",")})&completed_at=not.is.null&order=completed_at`,{},s);
-    const map=new Map<string,string>();wes.forEach(w=>map.set(w.id,new Date(w.workout.started_at).toLocaleDateString(undefined,{month:"short",day:"numeric"})));
-    setProgress(sets.map(x=>({d:map.get(x.workout_exercise_id)||"",w:Number(x.weight)})).filter(x=>x.w>0));
-  }
-
-  useEffect(()=>{if(session&&current)loadProgress(session,current.exercise_id).catch(()=>{});},[selected,session,current?.exercise_id]);
-
-  function focusCurrentWorkout(){
-    requestAnimationFrame(()=>document.getElementById("current-workout")?.scrollIntoView({behavior:"smooth",block:"start"}));
-  }
-
-  async function start(n:string){
-    if(!n.trim())return;setError("");setLoading(true);
-    try{const s=await createAccount(n);setSession(s);setName(n.trim());await db("profiles",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify({id:s.user.id,display_name:n.trim()})},s);await loadData(s);}
-    catch(e){setError(e instanceof Error?e.message:"Could not create account");}
-    finally{setLoading(false);}
-  }
-
-  async function addExercise(e:CatalogExercise){
-    if(!session)return;
-    const existing=workoutExercises.findIndex(x=>x.exercise_id===e.id);
-    if(existing>=0){setSelected(existing);focusCurrentWorkout();return;}
-    const workout=await db<any[]>(`workouts?select=id&user_id=eq.${session.user.id}&order=started_at.desc&limit=1`,{},session);
-    const row=await db<any[]>("workout_exercises",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({workout_id:workout[0].id,exercise_id:e.id,sort_order:workoutExercises.length})},session);
-    setWorkoutExercises(x=>[...x,{...row[0],exercise:e,sets:[{set_number:1,reps:8,weight:0,done:false}]}]);
-    setSelected(workoutExercises.length);
-    focusCurrentWorkout();
-  }
-
-  async function createCustomExercise(){
-    if(!session||!newExercise.trim())return;setError("");
-    try{const rows=await db<DbExercise[]>("exercises",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({name:newExercise.trim(),muscle_group:newMuscle,is_custom:true,user_id:session.user.id})},session);const e={...rows[0],image:imageFor(newExercise.trim())};setCatalog(x=>[...x,e].sort((a,b)=>a.name.localeCompare(b.name)));setNewExercise("");await addExercise(e);}
-    catch(e){setError(e instanceof Error?e.message:"Could not create exercise");}
-  }
-
-  async function removeExercise(){
-    if(!session||!current)return;
-    if(!window.confirm(`Delete ${current.exercise.name} from your exercise library? Its workout history will also be deleted.`))return;
-    try{await db(`exercises?id=eq.${current.exercise.id}`,{method:"DELETE"},session);const next=workoutExercises.filter(x=>x.exercise_id!==current.exercise.id);setWorkoutExercises(next);setCatalog(x=>x.filter(x=>x.id!==current.exercise.id));setSelected(Math.max(0,Math.min(selected,next.length-1)));setProgress([]);}
-    catch(e){setError(e instanceof Error?e.message:"Could not delete exercise");}
-  }
-
-  function editSet(i:number,key:"reps"|"weight",v:string){setWorkoutExercises(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:e.sets.map((s,si)=>si===i?{...s,[key]:v===""?0:Number(v)}:s)}));}
-  function addSet(){if(!current)return;setWorkoutExercises(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:[...e.sets,{set_number:e.sets.length+1,reps:e.sets.at(-1)?.reps||8,weight:e.sets.at(-1)?.weight||0,done:false}]}));}
-
-  async function saveSet(i:number){
-    if(!session||!current)return;const s=current.sets[i];if(!s||s.reps<=0)return;setSaving(true);
-    try{if(s.id)await db(`sets?id=eq.${s.id}`,{method:"PATCH",body:JSON.stringify({reps:s.reps,weight:s.weight,completed_at:new Date().toISOString()})},session);else{const ins=await db<any[]>("sets",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({workout_exercise_id:current.id,set_number:s.set_number,reps:s.reps,weight:s.weight,completed_at:new Date().toISOString()})},session);s.id=ins[0]?.id;}setWorkoutExercises(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:e.sets.map((x,si)=>si===i?{...x,done:true,completed_at:new Date().toISOString()}:x)}));}
-    finally{setSaving(false);}
-  }
-
-  async function saveName(){if(!session||!name.trim())return;const s=await updateProfileName(session,name);setSession(s);await db("profiles",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify({id:s.user.id,display_name:name.trim()})},s);}
-  function forgetDevice(){localStorage.removeItem("reptrack-user");location.reload();}
-  async function removeAccount(){if(!session||deleting)return;if(!window.confirm("Delete your profile and all workouts permanently? This cannot be undone."))return;setDeleting(true);setError("");try{await deleteAccount(session);location.reload()}catch(e){setError(e instanceof Error?e.message:"Could not delete profile");setDeleting(false)}}
-
-  if(loading)return <main className="app"><div className="loading">Loading your gym...</div></main>;
-  if(!session)return <main className="app auth-screen"><div className="logo">RepTrack</div><section className="hero auth-hero"><div className="label">Your gym log</div><h1>Just your name. Then train.</h1><div className="muted">No email. No password. Your browser remembers you.</div></section><section className="card"><div className="field"><label>Your name</label><input autoFocus value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&start(name)} placeholder="e.g. Alex"/></div>{error&&<p className="error">{error}</p>}<button className="primary" onClick={()=>start(name)} disabled={!name.trim()}>Start training</button><p className="tiny">Your name is all you need. Your browser remembers this profile.</p></section></main>;
-
-  return <main className="app"><header className="top"><div className="logo">RepTrack</div><button className="pill" onClick={()=>setTab("profile")}>{name||"Profile"}</button></header>
-    {tab==="today"&&<>
-      <section className="hero today-hero"><div className="label">Today</div><h1>Your workout, right here.</h1><div className="muted">{completed} of {totalSets} sets completed · Stay focused on the next set.</div></section>
-      <section id="current-workout" className="card workout-card">
-        <div className="section-head"><div><div className="label">Current workout</div><h2>{workoutExercises.length?`${workoutExercises.length} exercises`:"Nothing planned yet"}</h2></div><span className="pill">{completed}/{totalSets} done</span></div>
-        {workoutExercises.length>0&&<div className="workout-tabs">{workoutExercises.map((e,i)=><button key={e.id} className={"workout-tab "+(i===selected?"active":"")} onClick={()=>setSelected(i)}><img src={imageFor(e.exercise.name)} alt=""/><span><b>{i+1}</b>{e.exercise.name}</span><small>{e.sets.filter(s=>s.done).length}/{e.sets.length}</small></button>)}</div>}
-        {current&&<div className="current-exercise"><div className="current-cover"><img src={imageFor(current.exercise.name)} alt="" onError={e=>{e.currentTarget.style.display="none"}}/><div className="cover-fallback"><Dumbbell size={28}/></div></div><div className="current-body"><div className="section-head"><div><h2>{current.exercise.name}</h2><span className="muted">{current.exercise.muscle_group} · {current.sets.length} sets</span></div><button className="danger-icon" title="Delete exercise" onClick={removeExercise}><Trash2 size={17}/></button></div>
-          <div className="sets">{current.sets.map((s,i)=><div className="set" key={s.id||i}><span className="setnum">{i+1}</span><input aria-label="reps" type="number" min="1" value={s.reps} onChange={e=>editSet(i,"reps",e.target.value)}/><input aria-label="weight" type="number" min="0" value={s.weight===0?"":s.weight} placeholder="0" onChange={e=>editSet(i,"weight",e.target.value)}/><span className="label">lb</span><button className={"check "+(s.done?"done":"")} onClick={()=>saveSet(i)} disabled={saving}>{s.done?<Check size={18}/>:<span>✓</span>}</button></div>)}</div><button className="secondary full" onClick={addSet}>+ Add set</button>
-        </div></div>}
-        {!workoutExercises.length&&<div className="empty-workout"><Dumbbell size={24}/><p>Add an exercise below to start today's workout.</p></div>}
-      </section>
-
-      <section className="card library-card"><div className="section-head"><div><div className="label">Exercise library</div><h2>Add to today's workout</h2></div><span className="muted">{catalog.length} exercises</span></div>
-        <div className="custom-row"><input value={newExercise} onChange={e=>setNewExercise(e.target.value)} placeholder="Add your own exercise"/><select value={newMuscle} onChange={e=>setNewMuscle(e.target.value)}>{muscleGroups.map(m=><option key={m}>{m}</option>)}</select><button className="secondary icon-button" onClick={createCustomExercise} disabled={!newExercise.trim()}><Plus size={17}/></button></div>
-        <div className="exercise-grid">{catalog.map(e=><button className="exercise-card" key={e.id} onClick={()=>addExercise(e)}><div className="exercise-image"><img src={e.image} alt="" onError={ev=>{ev.currentTarget.style.display="none"}}/><Dumbbell size={20}/></div><span>{e.name}</span><small>{e.muscle_group}{e.is_custom?" · Custom":""}</small></button>)}</div>
-        <p className="tiny image-credit">Exercise illustrations use the public-domain Free Exercise DB image library.</p>
-      </section>
-      {error&&<p className="error">{error}</p>}
-    </>}
-    {tab==="progress"&&<><section className="hero"><div className="label">Progress</div><h1>Real numbers. Real progress.</h1><div className="muted">{current?.exercise.name||"Add an exercise"} · saved sets only.</div></section><section className="card"><div className="section-head"><h2>{current?.exercise.name||"Choose an exercise"}</h2><span className="pill">{progress.length} entries</span></div><div className="chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={progress}><CartesianGrid vertical={false}/><XAxis dataKey="d" tickLine={false}/><YAxis tickLine={false}/><Tooltip/><Bar dataKey="w" radius={[7,7,0,0]}/></BarChart></ResponsiveContainer></div></section></>}
-    {tab==="profile"&&<><section className="hero"><div className="label">Profile</div><h1>Hey {name}.</h1><div className="muted">Your workouts stay linked to your profile on this browser.</div></section><section className="card"><div className="field"><label>Name</label><input value={name} onChange={e=>setName(e.target.value)}/></div><button className="primary" onClick={saveName}>Save profile</button><button className="danger" onClick={forgetDevice}><LogOut size={15}/> Forget this device</button><button className="danger" onClick={removeAccount} disabled={deleting}><Trash2 size={15}/> {deleting?"Deleting profile…":"Delete profile permanently"}</button>{error&&<p className="error">{error}</p>}</section></>}
-    <nav className="bottom"><button className={"nav "+(tab==="today"?"active":"")} onClick={()=>setTab("today")}><Dumbbell size={17}/><br/>Today</button><button className={"nav "+(tab==="progress"?"active":"")} onClick={()=>setTab("progress")}><BarChart3 size={17}/><br/>Progress</button><button className={"nav "+(tab==="profile"?"active":"")} onClick={()=>setTab("profile")}><UserRound size={17}/><br/>Profile</button></nav>
-  </main>;
+ return <main className="app"><header className="top"><div><div className="logo">RepTrack</div><small>{name}</small></div><button className="avatar" onClick={()=>setTab("profile")}>{name[0]}</button></header>
+ {tab==="workout"&&<section className="screen">{!workout?<><section className="hero hero-workout"><span className="eyebrow">GOOD {new Date().getHours()<12?"MORNING":new Date().getHours()<18?"AFTERNOON":"EVENING"}, {name.split(" ")[0].toUpperCase()}</span><h1>Ready to train?</h1><p>Pick a workout. We’ll remember your last performance.</p><button className="primary hero-button" onClick={()=>setShowStart(true)}>START WORKOUT <ChevronRight/></button></section><section className="section-block"><div className="section-title">WORKOUTS</div><div className="template-grid">{templates.map(t=><button className="template" key={t.id} onClick={()=>startWorkout(t)}><span><b>{t.name}</b><small>{t.exercise_ids.length} exercises</small></span><ChevronRight/></button>)}</div></section><section className="section-block"><div className="section-title">RECENT <button onClick={()=>setTab("evolution")}>SEE ALL</button></div>{history.slice(0,3).map(h=><button className="history-row" key={h.id} onClick={()=>setDetails(h)}><span><b>{templates.find(t=>t.id===h.template_id)?.name||"Workout"}</b><small>{new Date(h.started_at).toLocaleDateString()}</small></span><strong>{h.duration?Math.round(h.duration/60):"—"} min</strong></button>)}</section></>:<section id="current-workout" className="active-workout"><div className="workout-bar"><div><span className="eyebrow">IN PROGRESS</span><h1>{templates.find(t=>t.id===workout.template_id)?.name||"Workout"}</h1></div><div className="timer"><Clock3 size={15}/>{time(elapsed)}</div></div><div className="progress-line"><span style={{width:`${setCount?Math.round(done/setCount*100):0}%`}}/></div><div className="exercise-strip">{items.map((e,i)=><button className={i===selected?"active":""} key={e.id} onClick={()=>setSelected(i)}><img src={imageFor(e.exercise.name)} alt=""/><b>{i+1}</b></button>)}</div>{current&&<div className="exercise-focus"><div className="exercise-heading"><div><span className="eyebrow">{current.exercise.muscle_group||"EXERCISE"}</span><h2>{current.exercise.name}</h2></div><span className="set-count">{current.sets.filter(s=>s.done).length}/{current.sets.length}</span></div><div className="last-session"><div><span>LAST SESSION</span><b>{progress.length?progress.slice(-3).map(x=>`${x.w} kg`).join(" · "):"No previous session"}</b></div><Trophy size={18}/></div><div className="set-list">{current.sets.map((s,i)=><div className={"set-row "+(s.done?"saved":"")} key={s.id||i}><span className="set-number">{i+1}</span><input aria-label={`Weight set ${i+1}`} inputMode="decimal" type="number" min="0" step="0.5" placeholder="0" value={s.weight===0?"":s.weight} onChange={e=>edit(i,"weight",e.target.value)}/><span className="unit">kg</span><span className="times">×</span><input aria-label={`Reps set ${i+1}`} inputMode="numeric" type="number" min="1" step="1" value={s.reps} onChange={e=>edit(i,"reps",e.target.value)}/><button className="save-set" onClick={()=>saveSet(i)} disabled={saving}>{s.done?<Check size={18}/>:"✓"}</button></div>)}</div><button className="add-set" onClick={addSet}><Plus size={16}/> ADD SET</button><div className="quick-row"><button onClick={()=>{setRest(60);setRestOn(true)}}><Clock3 size={15}/> REST 60S</button>{restOn&&<button onClick={()=>setRest(v=>v+30)}>+30 SEC</button>}</div><button className="next" onClick={next}>{selected===items.length-1?"FINISH WORKOUT":"NEXT EXERCISE"}<ChevronRight/></button></div>}</section>}<section className="card compact-library"><div className="section-title">ADD EXERCISE</div><div className="search"><Search size={17}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search exercises"/></div><div className="chips">{muscles.map(m=><button className={muscle===m?"on":""} key={m} onClick={()=>setMuscle(m)}>{m}</button>)}</div><div className="library-list">{filtered.map(e=><button key={e.id} onClick={()=>addExercise(e)}><img src={imageFor(e.name)} alt=""/><span><b>{e.name}</b><small>{e.muscle_group}</small></span><Plus size={16}/></button>)}</div><div className="custom-add"><input value={newExercise} onChange={e=>setNewExercise(e.target.value)} placeholder="Add your own exercise"/><select value={newMuscle} onChange={e=>setNewMuscle(e.target.value)}>{muscles.slice(1).map(m=><option key={m}>{m}</option>)}</select><button onClick={createExercise} disabled={!newExercise.trim()}><Plus/></button></div></section>{error&&<p className="error">{error}</p>}</section>}
+ {tab==="evolution"&&<section className="screen"><section className="hero"><span className="eyebrow">YOUR EVOLUTION</span><h1>Keep getting stronger.</h1><p>Your history, without the spreadsheet.</p></section><div className="stats"><div><span>WORKOUTS</span><b>{history.length}</b><small>completed</small></div><div><span>SETS TODAY</span><b>{done}</b><small>completed</small></div><div><span>VOLUME</span><b>{Math.round(volume).toLocaleString()}</b><small>kg today</small></div></div><section className="card chart-card"><div className="section-title">{current?.exercise.name||"Strength"}</div><div className="chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={progress}><CartesianGrid vertical={false}/><XAxis dataKey="d" tickLine={false}/><YAxis tickLine={false}/><Tooltip/><Bar dataKey="w" radius={[6,6,0,0]}/></BarChart></ResponsiveContainer></div></section><section className="section-block"><div className="section-title">RECENT WORKOUTS</div>{history.map(h=><button className="history-row" key={h.id} onClick={()=>setDetails(h)}><span><b>{templates.find(t=>t.id===h.template_id)?.name||"Workout"}</b><small>{new Date(h.started_at).toLocaleString()}</small></span><strong>{h.duration?Math.round(h.duration/60):"—"} min <ChevronRight size={15}/></strong></button>)}</section></section>}
+ {tab==="profile"&&<section className="screen"><section className="hero profile-hero"><div className="profile-avatar">{name[0]}</div><span className="eyebrow">PROFILE</span><h1>{name}</h1><p>Your private training notebook.</p></section><section className="card"><label className="field-label">NAME</label><input value={name} onChange={e=>setName(e.target.value)}/><button className="primary" onClick={saveName}>SAVE PROFILE</button><button className="secondary wide" onClick={()=>setPicker(true)}>SWITCH USER</button><button className="danger wide" onClick={forget}><LogOut size={16}/> FORGET THIS DEVICE</button><button className="danger wide" onClick={deleteMe}><X size={16}/> DELETE MY DATA</button></section></section>}
+ <nav className="bottom"><button className={tab==="workout"?"active":""} onClick={()=>setTab("workout")}><Dumbbell/><span>Workout</span></button><button className={tab==="evolution"?"active":""} onClick={()=>setTab("evolution")}><BarChart3/><span>Evolution</span></button><button className={tab==="profile"?"active":""} onClick={()=>setTab("profile")}><UserRound/><span>Profile</span></button></nav>
+ {showStart&&<Modal title="Choose your workout" close={()=>setShowStart(false)}><div className="modal-list">{templates.map(t=><button key={t.id} onClick={()=>startWorkout(t)}><span><b>{t.name}</b><small>{t.description||`${t.exercise_ids.length} exercises`}</small></span><ChevronRight/></button>)}</div></Modal>}
+ {picker&&<Modal title="Who's training?" close={()=>setPicker(false)}><div className="member-grid">{members.map(m=><button className="member" key={m.id} onClick={()=>switchUser(m.id)}><i>{m.display_name[0]}</i>{m.display_name}</button>)}</div></Modal>}
+ {complete&&<Modal title="WORKOUT COMPLETE" close={()=>setComplete(false)}><div className="complete"><Flame size={36}/><h2>Great session, {name.split(" ")[0]}.</h2><p>{Math.round(elapsed/60)} min · {items.length} exercises</p><div className="complete-stats"><div><b>{done}</b><span>sets</span></div><div><b>{reps}</b><span>reps</span></div><div><b>{Math.round(volume).toLocaleString()}</b><span>kg</span></div></div><button className="primary" onClick={()=>{setComplete(false);setWorkout(null);setItems([]);setSelected(0)}}>DONE</button></div></Modal>}
+ {details&&<Modal title="Workout details" close={()=>setDetails(null)}><div className="detail"><p>{new Date(details.started_at).toLocaleString()}</p><b>{details.duration?Math.round(details.duration/60):"—"} minutes</b><p>Completed workout history is read-only.</p></div></Modal>}
+ {restOn&&<div className="rest-float"><span>REST</span><b>{time(rest)}</b><button onClick={()=>setRest(v=>v+30)}>+30 SEC</button><button onClick={()=>setRestOn(false)}><X size={15}/></button></div>}
+ </main>
 }
+function Modal({title,close,children}:{title:string;close:()=>void;children:React.ReactNode}){return <div className="modal-backdrop"><div className="modal"><div className="modal-head"><h2>{title}</h2><button onClick={close}><X/></button></div>{children}</div></div>}
