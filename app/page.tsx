@@ -76,7 +76,7 @@ export default function Home(){
 
   async function loadProgress(s:Session,exerciseId?:string){
     if(!exerciseId){setProgress([]);return;}
-    const wes=await db<any[]>(`workout_exercises?select=id,workout:workouts!inner(user_id,started_at)&exercise_id=eq.${exerciseId}&workout.user_id=eq.${s.user.id}&order=workout.started_at`,{},s);
+    const wes=await db<any[]>(`workout_exercises?select=id,workout:workouts!inner(user_id,started_at)&exercise_id=eq.${exerciseId}&workout.user_id=eq.${s.user.id}&order=workout(started_at).asc`,{},s);
     if(!wes.length){setProgress([]);return;}
     const sets=await db<any[]>(`sets?select=*&workout_exercise_id=in.(${wes.map(w=>w.id).join(",")})&completed_at=not.is.null&order=completed_at`,{},s);
     const map=new Map<string,string>();wes.forEach(w=>map.set(w.id,new Date(w.workout.started_at).toLocaleDateString(undefined,{month:"short",day:"numeric"})));
