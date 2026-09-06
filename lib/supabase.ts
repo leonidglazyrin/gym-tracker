@@ -1,5 +1,5 @@
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://ngsadfoekvtapctolrmw.supabase.co";
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_Xmbt9RmJp4dEFm_AAc3RwA_wR68RT63";
+const SUPABASE_URL = "https://ngsadfoekvtapctolrmw.supabase.co";
+const SUPABASE_KEY = "sb_publishable_Xmbt9RmJp4dEFm_AAc3RwA_wR68RT63";
 const STORAGE_KEY = "reptrack-user";
 export type User = { id: string; user_metadata?: { display_name?: string } };
 export type Session = { access_token: string; refresh_token: string; user: User };
@@ -40,7 +40,8 @@ export async function deleteAccount(session: Session) {
 }
 
 export async function db<T = any>(path: string, options: RequestInit = {}, session: Session): Promise<T> {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+  const url = new URL(`/rest/v1/${path}`, SUPABASE_URL);
+  const res = await fetch(url.toString(), {
     ...options,
     headers: {
       apikey: SUPABASE_KEY,
@@ -54,5 +55,6 @@ export async function db<T = any>(path: string, options: RequestInit = {}, sessi
     throw new Error(text || `Database request failed (${res.status})`);
   }
   if (res.status === 204) return undefined as T;
-  return res.json();
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
