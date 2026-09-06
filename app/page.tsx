@@ -75,6 +75,10 @@ export default function Home(){
 
   useEffect(()=>{if(session&&current)loadProgress(session,current.exercise_id).catch(()=>{});},[selected,session,current?.exercise_id]);
 
+  function focusCurrentWorkout(){
+    requestAnimationFrame(()=>document.getElementById("current-workout")?.scrollIntoView({behavior:"smooth",block:"start"}));
+  }
+
   async function start(n:string){
     if(!n.trim())return;setError("");setLoading(true);
     try{const s=await createAccount(n);setSession(s);setName(n.trim());await db("profiles",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify({id:s.user.id,display_name:n.trim()})},s);await loadData(s);}
@@ -84,10 +88,13 @@ export default function Home(){
 
   async function addExercise(e:CatalogExercise){
     if(!session)return;
-    const existing=workoutExercises.findIndex(x=>x.exercise_id===e.id);if(existing>=0){setSelected(existing);return;}
+    const existing=workoutExercises.findIndex(x=>x.exercise_id===e.id);
+    if(existing>=0){setSelected(existing);focusCurrentWorkout();return;}
     const workout=await db<any[]>(`workouts?select=id&user_id=eq.${session.user.id}&order=started_at.desc&limit=1`,{},session);
     const row=await db<any[]>("workout_exercises",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({workout_id:workout[0].id,exercise_id:e.id,sort_order:workoutExercises.length})},session);
-    setWorkoutExercises(x=>[...x,{...row[0],exercise:e,sets:[{set_number:1,reps:8,weight:0,done:false}]}]);setSelected(workoutExercises.length);
+    setWorkoutExercises(x=>[...x,{...row[0],exercise:e,sets:[{set_number:1,reps:8,weight:0,done:false}]}]);
+    setSelected(workoutExercises.length);
+    focusCurrentWorkout();
   }
 
   async function createCustomExercise(){
@@ -103,7 +110,7 @@ export default function Home(){
     catch(e){setError(e instanceof Error?e.message:"Could not delete exercise");}
   }
 
-  function editSet(i:number,key:"reps"|"weight",v:string){setWorkoutExercises(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:e.sets.map((s,si)=>si===i?{...s,[key]:Number(v)}:s)}));}
+  function editSet(i:number,key:"reps"|"weight",v:string){setWorkoutExercises(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:e.sets.map((s,si)=>si===i?{...s,[key]:v===""?0:Number(v)}:s)}));}
   function addSet(){if(!current)return;setWorkoutExercises(es=>es.map((e,ei)=>ei!==selected?e:{...e,sets:[...e.sets,{set_number:e.sets.length+1,reps:e.sets.at(-1)?.reps||8,weight:e.sets.at(-1)?.weight||0,done:false}]}));}
 
   async function saveSet(i:number){
@@ -122,11 +129,11 @@ export default function Home(){
   return <main className="app"><header className="top"><div className="logo">RepTrack</div><button className="pill" onClick={()=>setTab("profile")}>{name||"Profile"}</button></header>
     {tab==="today"&&<>
       <section className="hero today-hero"><div className="label">Today</div><h1>Your workout, right here.</h1><div className="muted">{completed} of {totalSets} sets completed · Stay focused on the next set.</div></section>
-      <section className="card workout-card">
+      <section id="current-workout" className="card workout-card">
         <div className="section-head"><div><div className="label">Current workout</div><h2>{workoutExercises.length?`${workoutExercises.length} exercises`:"Nothing planned yet"}</h2></div><span className="pill">{completed}/{totalSets} done</span></div>
-        {workoutExercises.length>0&&<div className="workout-tabs">{workoutExercises.map((e,i)=><button key={e.id} className={"workout-tab "+(i===selected?"active":"")} onClick={()=>setSelected(i)}><img src={e.exercise?e.exercise.user_id?imageFor(e.exercise.name):imageFor(e.exercise.name):""} alt=""/><span><b>{i+1}</b>{e.exercise.name}</span><small>{e.sets.filter(s=>s.done).length}/{e.sets.length}</small></button>)}</div>}
+        {workoutExercises.length>0&&<div className="workout-tabs">{workoutExercises.map((e,i)=><button key={e.id} className={"workout-tab "+(i===selected?"active":"")} onClick={()=>setSelected(i)}><img src={imageFor(e.exercise.name)} alt=""/><span><b>{i+1}</b>{e.exercise.name}</span><small>{e.sets.filter(s=>s.done).length}/{e.sets.length}</small></button>)}</div>}
         {current&&<div className="current-exercise"><div className="current-cover"><img src={imageFor(current.exercise.name)} alt="" onError={e=>{e.currentTarget.style.display="none"}}/><div className="cover-fallback"><Dumbbell size={28}/></div></div><div className="current-body"><div className="section-head"><div><h2>{current.exercise.name}</h2><span className="muted">{current.exercise.muscle_group} · {current.sets.length} sets</span></div><button className="danger-icon" title="Delete exercise" onClick={removeExercise}><Trash2 size={17}/></button></div>
-          <div className="sets">{current.sets.map((s,i)=><div className="set" key={s.id||i}><span className="setnum">{i+1}</span><input aria-label="reps" type="number" min="1" value={s.reps} onChange={e=>editSet(i,"reps",e.target.value)}/><input aria-label="weight" type="number" min="0" value={s.weight} onChange={e=>editSet(i,"weight",e.target.value)}/><span className="label">lb</span><button className={"check "+(s.done?"done":"")} onClick={()=>saveSet(i)} disabled={saving}>{s.done?<Check size={18}/>:<span>✓</span>}</button></div>)}</div><button className="secondary full" onClick={addSet}>+ Add set</button>
+          <div className="sets">{current.sets.map((s,i)=><div className="set" key={s.id||i}><span className="setnum">{i+1}</span><input aria-label="reps" type="number" min="1" value={s.reps} onChange={e=>editSet(i,"reps",e.target.value)}/><input aria-label="weight" type="number" min="0" value={s.weight===0?"":s.weight} placeholder="0" onChange={e=>editSet(i,"weight",e.target.value)}/><span className="label">lb</span><button className={"check "+(s.done?"done":"")} onClick={()=>saveSet(i)} disabled={saving}>{s.done?<Check size={18}/>:<span>✓</span>}</button></div>)}</div><button className="secondary full" onClick={addSet}>+ Add set</button>
         </div></div>}
         {!workoutExercises.length&&<div className="empty-workout"><Dumbbell size={24}/><p>Add an exercise below to start today's workout.</p></div>}
       </section>
