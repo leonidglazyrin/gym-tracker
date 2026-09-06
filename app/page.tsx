@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, Check, Dumbbell, LogOut, Plus, Trash2, UserRound, X } from "lucide-react";
+import { BarChart3, Check, Dumbbell, LogOut, Plus, Trash2, UserRound } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { createAccount, db, deleteAccount, getSession, Session, updateProfileName } from "../lib/supabase";
 
@@ -128,11 +128,11 @@ export default function Home(){
   }
 
   async function saveName(){if(!session||!name.trim())return;const s=await updateProfileName(session,name);setSession(s);await db("profiles",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify({id:s.user.id,display_name:name.trim()})},s);}
-  function forgetDevice(){localStorage.removeItem("reptrack-auth");location.reload();}
-  async function removeAccount(){if(!session||deleting)return;if(!window.confirm("Delete your account and all workouts permanently? This cannot be undone."))return;setDeleting(true);setError("");try{await deleteAccount(session);location.reload()}catch(e){setError(e instanceof Error?e.message:"Could not delete account");setDeleting(false)}}
+  function forgetDevice(){localStorage.removeItem("reptrack-user");location.reload();}
+  async function removeAccount(){if(!session||deleting)return;if(!window.confirm("Delete your profile and all workouts permanently? This cannot be undone."))return;setDeleting(true);setError("");try{await deleteAccount(session);location.reload()}catch(e){setError(e instanceof Error?e.message:"Could not delete profile");setDeleting(false)}}
 
   if(loading)return <main className="app"><div className="loading">Loading your gym...</div></main>;
-  if(!session)return <main className="app auth-screen"><div className="logo">RepTrack</div><section className="hero auth-hero"><div className="label">Your gym log</div><h1>Just your name. Then train.</h1><div className="muted">No email. No password. Your browser remembers you.</div></section><section className="card"><div className="field"><label>Your name</label><input autoFocus value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&start(name)} placeholder="e.g. Alex"/></div>{error&&<p className="error">{error}</p>}<button className="primary" onClick={()=>start(name)} disabled={!name.trim()}>Create my account</button><p className="tiny">This creates a real Supabase account tied to this browser.</p></section></main>;
+  if(!session)return <main className="app auth-screen"><div className="logo">RepTrack</div><section className="hero auth-hero"><div className="label">Your gym log</div><h1>Just your name. Then train.</h1><div className="muted">No email. No password. Your browser remembers you.</div></section><section className="card"><div className="field"><label>Your name</label><input autoFocus value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&start(name)} placeholder="e.g. Alex"/></div>{error&&<p className="error">{error}</p>}<button className="primary" onClick={()=>start(name)} disabled={!name.trim()}>Start training</button><p className="tiny">Your name is all you need. Your browser remembers this profile.</p></section></main>;
 
   return <main className="app"><header className="top"><div className="logo">RepTrack</div><button className="pill" onClick={()=>setTab("profile")}>{name||"Profile"}</button></header>
     {tab==="today"&&<>
@@ -148,7 +148,7 @@ export default function Home(){
       {error&&<p className="error">{error}</p>}
     </>}
     {tab==="progress"&&<><section className="hero"><div className="label">Progress</div><h1>Real numbers. Real progress.</h1><div className="muted">{current?.exercise.name||"Add an exercise"} · saved sets only.</div></section><section className="card"><div className="section-head"><h2>{current?.exercise.name||"Choose an exercise"}</h2><span className="pill">{progress.length} entries</span></div><div className="chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={progress}><CartesianGrid vertical={false}/><XAxis dataKey="d" tickLine={false}/><YAxis tickLine={false}/><Tooltip/><Bar dataKey="w" radius={[7,7,0,0]}/></BarChart></ResponsiveContainer></div></section></>}
-    {tab==="profile"&&<><section className="hero"><div className="label">Profile</div><h1>Hey {name}.</h1><div className="muted">Your workouts stay linked to your account.</div></section><section className="card"><div className="field"><label>Name</label><input value={name} onChange={e=>setName(e.target.value)}/></div><button className="primary" onClick={saveName}>Save profile</button><button className="danger" onClick={forgetDevice}><LogOut size={15}/> Forget this device</button><button className="danger" onClick={removeAccount} disabled={deleting}><Trash2 size={15}/> {deleting?"Deleting account…":"Delete account permanently"}</button>{error&&<p className="error">{error}</p>}</section></>}
+    {tab==="profile"&&<><section className="hero"><div className="label">Profile</div><h1>Hey {name}.</h1><div className="muted">Your workouts stay linked to your profile on this browser.</div></section><section className="card"><div className="field"><label>Name</label><input value={name} onChange={e=>setName(e.target.value)}/></div><button className="primary" onClick={saveName}>Save profile</button><button className="danger" onClick={forgetDevice}><LogOut size={15}/> Forget this device</button><button className="danger" onClick={removeAccount} disabled={deleting}><Trash2 size={15}/> {deleting?"Deleting profile…":"Delete profile permanently"}</button>{error&&<p className="error">{error}</p>}</section></>}
     <nav className="bottom"><button className={"nav "+(tab==="today"?"active":"")} onClick={()=>setTab("today")}><Dumbbell size={17}/><br/>Today</button><button className={"nav "+(tab==="progress"?"active":"")} onClick={()=>setTab("progress")}><BarChart3 size={17}/><br/>Progress</button><button className={"nav "+(tab==="profile"?"active":"")} onClick={()=>setTab("profile")}><UserRound size={17}/><br/>Profile</button></nav>
   </main>;
 }
