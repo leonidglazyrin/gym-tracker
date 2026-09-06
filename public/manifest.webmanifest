@@ -1,0 +1,13 @@
+{
+  "name": "RepTrack Gym Tracker",
+  "short_name": "RepTrack",
+  "description": "A fast private gym workout tracker.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0c0d",
+  "theme_color": "#0b0c0d",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
