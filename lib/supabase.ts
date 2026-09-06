@@ -1,14 +1,58 @@
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://ngsadfoekvtapctolrmw.supabase.co";
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_Xmbt9RmJp4dEFm_AAc3RwA_wR68RT63";
-const STORAGE_KEY = "reptrack-auth";
-export type User = { id: string; user_metadata?: { display_name?: string }; is_anonymous?: boolean };
-export type Session = { access_token: string; refresh_token: string; expires_at?: number; user: User };
-async function authRequest(path: string, body?: unknown, token?: string) {
- const res = await fetch(`${SUPABASE_URL}/auth/v1${path}`, { method: body ? "POST" : "GET", headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token || SUPABASE_KEY}`, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
- const json = await res.json(); if (!res.ok) throw new Error(json.msg || json.message || json.error_description || "Authentication failed"); return json;
+const STORAGE_KEY = "reptrack-user";
+export type User = { id: string; user_metadata?: { display_name?: string } };
+export type Session = { access_token: string; refresh_token: string; user: User };
+
+function newId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
-export async function getSession(): Promise<Session | null> { if (typeof window === "undefined") return null; const raw = localStorage.getItem(STORAGE_KEY); if (!raw) return null; try { const session = JSON.parse(raw) as Session; if (session.expires_at && session.expires_at > Math.floor(Date.now()/1000)+60) return session; const next = await authRequest("/token?grant_type=refresh_token", { refresh_token: session.refresh_token }); localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); return next as Session; } catch { localStorage.removeItem(STORAGE_KEY); return null; } }
-export async function createAccount(name: string) { const data = await authRequest("/signup", { data: { display_name: name.trim() } }); if (!data.session) throw new Error("Anonymous sign-in is disabled. Enable Anonymous Sign-Ins in Supabase Authentication settings."); localStorage.setItem(STORAGE_KEY, JSON.stringify(data.session)); return data.session as Session; }
-export async function updateProfileName(session: Session, name: string) { const data = await authRequest("/user", { data: { display_name: name.trim() } }, session.access_token); const next = { ...session, user: data.user || { ...session.user, user_metadata: { display_name: name.trim() } } } as Session; localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); return next; }
-export async function deleteAccount(session: Session) { const res = await fetch(`${SUPABASE_URL}/functions/v1/delete-account`, { method: "POST", headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" } }); if (!res.ok) throw new Error(await res.text() || "Could not delete account"); localStorage.removeItem(STORAGE_KEY); }
-export async function db<T = any>(path: string, options: RequestInit = {}, session: Session): Promise<T> { const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...options, headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json", ...(options.headers || {}) } }); if (!res.ok) { const text = await res.text(); throw new Error(text || `Database request failed (${res.status})`); } if (res.status === 204) return undefined as T; return res.json(); }
+
+export async function getSession(): Promise<Session | null> {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return null;
+  try { return JSON.parse(raw) as Session; } catch { localStorage.removeItem(STORAGE_KEY); return null; }
+}
+
+export async function createAccount(name: string): Promise<Session> {
+  const session: Session = {
+    access_token: "",
+    refresh_token: "",
+    user: { id: newId(), user_metadata: { display_name: name.trim() } },
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  return session;
+}
+
+export async function updateProfileName(session: Session, name: string) {
+  const next: Session = { ...session, user: { ...session.user, user_metadata: { display_name: name.trim() } } };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  return next;
+}
+
+export async function deleteAccount(session: Session) {
+  await db(`exercises?user_id=eq.${session.user.id}`, { method: "DELETE" }, session);
+  await db(`workouts?user_id=eq.${session.user.id}`, { method: "DELETE" }, session);
+  await db(`profiles?id=eq.${session.user.id}`, { method: "DELETE" }, session);
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+export async function db<T = any>(path: string, options: RequestInit = {}, session: Session): Promise<T> {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      apikey: SUPABASE_KEY,
+      "Content-Type": "application/json",
+      "x-user-id": session.user.id,
+      ...(options.headers || {}),
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Database request failed (${res.status})`);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json();
+}
